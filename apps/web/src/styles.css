@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-slate-950 text-slate-100 min-h-screen antialiased;
+}
+
+a {
+  @apply text-emerald-400 hover:text-emerald-300 transition-colors;
+}
+
+button:disabled {
+  @apply opacity-70 cursor-not-allowed;
+}

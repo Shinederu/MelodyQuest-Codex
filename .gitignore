@@ -1,0 +1,10 @@
+.env
+node_modules
+vendor
+web_build
+web_node_modules
+realtime_node_modules
+mysql_data
+redis_data
+.idea
+.DS_Store
