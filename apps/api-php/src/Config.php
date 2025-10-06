@@ -64,7 +64,7 @@ class Config
             return ['*'];
         }
 
-        return array_values(array_filter(array_map('trim', explode(',', (string) $origins))));
+        return self::splitCsv((string) $origins);
     }
 
     public static function isDevelopment(): bool
@@ -80,5 +80,48 @@ class Config
     public static function rateLimitPerMinute(): int
     {
         return self::envInt('RATE_LIMIT_PER_MIN', 60);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public static function rateLimitWhitelist(): array
+    {
+        $value = (string) self::env('RATE_LIMIT_WHITELIST', '');
+
+        return self::splitCsv($value);
+    }
+
+    public static function pointsCorrectGuess(): int
+    {
+        return self::envInt('POINTS_CORRECT_GUESS', 1);
+    }
+
+    public static function bonusFirstBlood(): int
+    {
+        return max(0, self::envInt('BONUS_FIRST_BLOOD', 1));
+    }
+
+    public static function streakLength(): int
+    {
+        return max(0, self::envInt('STREAK_N', 3));
+    }
+
+    public static function streakBonus(): int
+    {
+        return max(0, self::envInt('STREAK_BONUS', 1));
+    }
+
+    public static function realtimeHmacSecret(): string
+    {
+        return (string) self::env('REALTIME_HMAC_SECRET', 'change-me');
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function splitCsv(string $value): array
+    {
+        return array_values(array_filter(array_map('trim', explode(',', $value))));
     }
 }

@@ -6,6 +6,7 @@ namespace MelodyQuest\Api\Services;
 
 use DateTimeImmutable;
 use Illuminate\Database\Capsule\Manager as Capsule;
+use MelodyQuest\Api\Config;
 use MelodyQuest\Api\Exceptions\ApiException;
 use MelodyQuest\Api\RedisBus;
 use MelodyQuest\Api\Models\Game;
@@ -236,6 +237,12 @@ class GameService
             'scores' => $scores->map(fn ($score) => $score->toArray())->all(),
             'rules' => [
                 'round_count' => $game->round_count,
+                'points' => [
+                    'correctGuess' => Config::pointsCorrectGuess(),
+                    'bonusFirstBlood' => Config::bonusFirstBlood(),
+                    'streakN' => Config::streakLength(),
+                    'streakBonus' => Config::streakBonus(),
+                ],
             ],
         ];
     }

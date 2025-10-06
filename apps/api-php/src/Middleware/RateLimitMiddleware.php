@@ -18,7 +18,8 @@ class RateLimitMiddleware implements MiddlewareInterface
     public function __construct(
         private ClientInterface $redis,
         private int $limitPerMinute,
-        private ResponseFactoryInterface $responseFactory
+        private ResponseFactoryInterface $responseFactory,
+        private array $whitelist = []
     ) {
     }
 
@@ -29,6 +30,10 @@ class RateLimitMiddleware implements MiddlewareInterface
         }
 
         $ip = $request->getServerParams()['REMOTE_ADDR'] ?? 'unknown';
+        if ($this->isWhitelisted($ip)) {
+            return $handler->handle($request);
+        }
+
         $minute = (new DateTimeImmutable('now'))->format('YmdHi');
         $key = sprintf('ratelimit:%s:%s', $ip, $minute);
         $count = (int) $this->redis->incr($key);
@@ -47,5 +52,10 @@ class RateLimitMiddleware implements MiddlewareInterface
         }
 
         return $handler->handle($request);
+    }
+
+    private function isWhitelisted(string $ip): bool
+    {
+        return in_array($ip, $this->whitelist, true);
     }
 }

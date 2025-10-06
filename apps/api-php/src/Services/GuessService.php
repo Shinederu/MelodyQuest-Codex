@@ -6,6 +6,7 @@ namespace MelodyQuest\Api\Services;
 
 use DateTimeImmutable;
 use Illuminate\Database\Capsule\Manager as Capsule;
+use MelodyQuest\Api\Config;
 use MelodyQuest\Api\Exceptions\ApiException;
 use MelodyQuest\Api\Models\GamePlayer;
 use MelodyQuest\Api\Models\Guess;
@@ -48,7 +49,7 @@ class GuessService
             throw new ApiException('Round has not started yet', 409, 'ROUND_NOT_STARTED');
         }
 
-        if ($round->ended_at !== null) {
+        if ($round->ended_at !== null || $round->winner_user_id !== null) {
             throw new ApiException('Round already ended', 409, 'ROUND_ENDED');
         }
 
@@ -58,57 +59,156 @@ class GuessService
         }
 
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
-        $result = Capsule::connection()->transaction(function () use ($round, $userId, $guessText, $now) {
-            $normalizedRow = Capsule::selectOne('SELECT fn_normalize(?) AS norm', [$guessText]);
-            $normalized = $normalizedRow->norm ?? '';
+        $basePoints = Config::pointsCorrectGuess();
+        $firstBloodBonus = Config::bonusFirstBlood();
+        $streakThreshold = Config::streakLength();
+        $streakBonus = Config::streakBonus();
 
-            $isCorrect = TrackAnswer::where('track_id', $round->track_id)
-                ->whereRaw('normalized = ?', [$normalized])
-                ->exists();
+        $result = Capsule::connection()->transaction(function () use (
+            $round,
+            $userId,
+            $guessText,
+            $now,
+            $basePoints,
+            $firstBloodBonus,
+            $streakThreshold,
+            $streakBonus
+        ) {
+            $roundForUpdate = Round::where('id', $round->id)->lockForUpdate()->first();
+            if (!$roundForUpdate) {
+                throw new ApiException('Round not found', 404, 'ROUND_NOT_FOUND');
+            }
+
+            if ($roundForUpdate->ended_at !== null || $roundForUpdate->winner_user_id !== null) {
+                throw new ApiException('Round already ended', 409, 'ROUND_ENDED');
+            }
+
+            $normalizedRow = Capsule::selectOne('SELECT fn_normalize(?) AS norm', [$guessText]);
+            $normalized = (string) ($normalizedRow->norm ?? '');
+
+            $answers = TrackAnswer::where('track_id', $roundForUpdate->track_id)
+                ->get(['answer_text', 'normalized']);
+
+            $hasExact = $answers->contains(function (TrackAnswer $answer) use ($normalized) {
+                return $normalized !== '' && hash_equals((string) $answer->normalized, $normalized);
+            });
+
+            $answerTexts = $answers->pluck('answer_text')->all();
+            $isCorrect = $hasExact || (!$hasExact && Fuzzy::isFuzzyMatch($guessText, $answerTexts));
 
             Guess::create([
-                'round_id' => $round->id,
+                'round_id' => $roundForUpdate->id,
                 'user_id' => $userId,
                 'guess_text' => $guessText,
                 'is_correct' => $isCorrect,
             ]);
 
-            $event = null;
-            if ($isCorrect && $round->winner_user_id === null) {
-                $round->winner_user_id = $userId;
-                $round->ended_at = $now;
-                $round->reveal_video = true;
-                $round->save();
+            $roundSolvedEvent = null;
+            $scoreUpdateEvent = null;
+
+            if ($isCorrect) {
+                $previousCorrectGuesses = Guess::query()
+                    ->select('rounds.round_number')
+                    ->join('rounds', 'rounds.id', '=', 'guesses.round_id')
+                    ->where('rounds.game_id', $roundForUpdate->game_id)
+                    ->where('rounds.round_number', '<', $roundForUpdate->round_number)
+                    ->where('guesses.user_id', $userId)
+                    ->where('guesses.is_correct', true)
+                    ->orderByDesc('rounds.round_number')
+                    ->get();
+
+                $hasPreviousCorrect = $previousCorrectGuesses->isNotEmpty();
+                $streakCount = 0;
+                if ($previousCorrectGuesses->isNotEmpty()) {
+                    $expectedRound = $roundForUpdate->round_number - 1;
+                    foreach ($previousCorrectGuesses as $prevGuess) {
+                        $prevRoundNumber = (int) $prevGuess->round_number;
+                        if ($prevRoundNumber === $expectedRound) {
+                            $streakCount++;
+                            $expectedRound--;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                $pointsTotal = 0;
+                if ($basePoints > 0) {
+                    $pointsTotal += $basePoints;
+                }
+
+                if (!$hasPreviousCorrect && $firstBloodBonus > 0) {
+                    $pointsTotal += $firstBloodBonus;
+                }
+
+                if (
+                    $streakThreshold > 0
+                    && ($streakCount + 1) >= $streakThreshold
+                    && $streakBonus > 0
+                ) {
+                    $pointsTotal += $streakBonus;
+                }
+
+                $roundForUpdate->winner_user_id = $userId;
+                $roundForUpdate->ended_at = $now;
+                $roundForUpdate->reveal_video = true;
+                $roundForUpdate->save();
 
                 $score = Score::firstOrCreate([
-                    'game_id' => $round->game_id,
+                    'game_id' => $roundForUpdate->game_id,
                     'user_id' => $userId,
                 ], [
                     'points' => 0,
                 ]);
-                $score->increment('points');
+                if ($pointsTotal > 0) {
+                    $score->increment('points', $pointsTotal);
+                }
 
-                $event = [
+                $track = $round->track ?? $roundForUpdate->track()->first();
+
+                $roundSolvedEvent = [
                     'type' => 'ROUND_SOLVED',
-                    'round_id' => $round->id,
+                    'round_id' => $roundForUpdate->id,
                     'winner_user_id' => $userId,
                     'track' => [
-                        'id' => $round->track->id,
-                        'title' => $round->track->title,
-                        'youtube_video_id' => $round->track->youtube_video_id,
-                        'cover_image_url' => $round->track->cover_image_url,
+                        'id' => $track?->id,
+                        'title' => $track?->title,
+                        'youtube_video_id' => $track?->youtube_video_id,
+                        'cover_image_url' => $track?->cover_image_url,
                     ],
+                ];
+
+                $scoresForEvent = Score::where('game_id', $roundForUpdate->game_id)
+                    ->orderByDesc('points')
+                    ->get(['user_id', 'points'])
+                    ->map(static function (Score $scoreRow): array {
+                        return [
+                            'user_id' => (int) $scoreRow->user_id,
+                            'points' => (int) $scoreRow->points,
+                        ];
+                    })
+                    ->all();
+
+                $scoreUpdateEvent = [
+                    'type' => 'SCORE_UPDATE',
+                    'game_id' => $roundForUpdate->game_id,
+                    'scores' => $scoresForEvent,
                 ];
             }
 
             return [
                 'is_correct' => $isCorrect,
-                'event' => $event,
+                'round_event' => $roundSolvedEvent,
+                'score_event' => $scoreUpdateEvent,
             ];
         });
 
-        if ($result['event'] !== null) {
-            $this->bus->publish(RedisBus::channelGame($round->game_id), $result['event']);
+        if ($result['round_event'] !== null) {
+            $this->bus->publish(RedisBus::channelGame($round->game_id), $result['round_event']);
+        }
+
+        if ($result['score_event'] !== null) {
+            $this->bus->publish(RedisBus::channelGame($round->game_id), $result['score_event']);
         }
 
         return [

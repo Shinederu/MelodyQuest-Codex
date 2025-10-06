@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MelodyQuest\Api\Routes;
 
+use MelodyQuest\Api\Config;
 use MelodyQuest\Api\Exceptions\ApiException;
 use MelodyQuest\Api\Models\User;
 use MelodyQuest\Api\Responses;
@@ -18,6 +19,45 @@ class PlayerRoutes
     public static function register(App $app, GameService $gameService, GuessService $guessService): void
     {
         $responseFactory = $app->getResponseFactory();
+
+        $app->post('/api/token/guest', function ($request) use ($responseFactory) {
+            $body = (array) $request->getParsedBody();
+            $validator = v::key('user_id', v::intType()->positive())
+                ->key('username', v::stringType()->length(1, 64));
+
+            try {
+                $validator->assert($body);
+            } catch (NestedValidationException $exception) {
+                return Responses::jsonErr(
+                    $responseFactory,
+                    'VALIDATION_ERROR',
+                    'Invalid guest token payload',
+                    422,
+                    $exception->getMessages()
+                );
+            }
+
+            $user = User::find((int) $body['user_id']);
+            if ($user === null) {
+                return Responses::jsonErr($responseFactory, 'USER_NOT_FOUND', 'User not found', 404);
+            }
+
+            $secret = Config::realtimeHmacSecret();
+            if ($secret === '') {
+                return Responses::jsonErr($responseFactory, 'TOKEN_DISABLED', 'Guest token generation is not configured', 503);
+            }
+
+            $username = (string) $body['username'];
+            if ($user->username !== $username) {
+                $username = $user->username;
+            }
+
+            $payload = sprintf('%d.%s', $user->id, $username);
+            $tokenBinary = hash_hmac('sha256', $payload, $secret, true);
+            $token = rtrim(strtr(base64_encode($tokenBinary), '+/', '-_'), '=');
+
+            return Responses::jsonOk($responseFactory, ['token' => $token]);
+        });
 
         $app->post('/api/users', function ($request) use ($responseFactory) {
             $body = (array) $request->getParsedBody();

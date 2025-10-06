@@ -104,17 +104,17 @@ services:
       retries: 3
 
   realtime:
-    image: node:20-alpine
-    working_dir: /app
-    volumes:
-      - ./apps/realtime-node:/app
-      - realtime_node_modules:/app/node_modules
-    command: sh -c "npm install && npm run dev"
+    build:
+      context: ./apps/realtime-node
+      dockerfile: Dockerfile
     environment:
-      - NODE_ENV=development
-      - PORT=3000
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      - APP_ENV=${APP_ENV:-development}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REALTIME_PORT=3000
+      - REALTIME_HMAC_SECRET=${REALTIME_HMAC_SECRET}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
     ports:
       - "3000:3000"
     depends_on:
@@ -123,7 +123,7 @@ services:
     networks:
       - melodyquest_net
     healthcheck:
-      test: ["CMD", "node", "-e", "process.exit(0)"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -136,5 +136,4 @@ volumes:
   mysql_data:
   redis_data:
   web_node_modules:
-  realtime_node_modules:
   web_build:

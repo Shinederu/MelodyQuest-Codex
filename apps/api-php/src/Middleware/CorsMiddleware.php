@@ -50,10 +50,13 @@ class CorsMiddleware implements MiddlewareInterface
     {
         $allowOrigin = $this->allowAll ? ($origin !== '' ? $origin : '*') : $origin;
 
-        return $response
+        $headers = $response
             ->withHeader('Access-Control-Allow-Origin', $allowOrigin === '' ? '*' : $allowOrigin)
-            ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Admin-Token')
-            ->withHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS')
-            ->withHeader('Access-Control-Allow-Credentials', 'true');
+            ->withHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Token')
+            ->withHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,OPTIONS')
+            ->withHeader('Access-Control-Allow-Credentials', 'true')
+            ->withHeader('Vary', 'Origin');
+
+        return $headers;
     }
 }

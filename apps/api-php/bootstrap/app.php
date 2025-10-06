@@ -31,7 +31,12 @@ $errorMiddleware = $app->addErrorMiddleware(Config::isDevelopment(), true, true)
 $errorMiddleware->setDefaultErrorHandler(new ErrorHandler($app->getResponseFactory()));
 
 $app->add(new CorsMiddleware($app->getResponseFactory(), Config::allowedOrigins(), Config::isDevelopment()));
-$app->add(new RateLimitMiddleware($redisBus->client(), Config::rateLimitPerMinute(), $app->getResponseFactory()));
+$app->add(new RateLimitMiddleware(
+    $redisBus->client(),
+    Config::rateLimitPerMinute(),
+    $app->getResponseFactory(),
+    Config::rateLimitWhitelist()
+));
 $app->add(new JsonBodyParser($app->getResponseFactory()));
 
 $trackService = new TrackService();

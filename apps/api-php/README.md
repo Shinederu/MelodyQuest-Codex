@@ -16,6 +16,13 @@ This service exposes the REST API for MelodyQuest using Slim 4 and Eloquent. It 
 | `REDIS_HOST` | Redis host. | `redis` |
 | `REDIS_PORT` | Redis port. | `6379` |
 | `RATE_LIMIT_PER_MIN` | Per-IP request limit per minute. | `60` |
+| `RATE_LIMIT_WHITELIST` | Comma-separated list of IP addresses exempt from rate limiting. | _(empty)_ |
+| `POINTS_CORRECT_GUESS` | Points awarded for a correct guess. | `1` |
+| `BONUS_FIRST_BLOOD` | Bonus points granted for a player's first correct answer in a game. | `1` |
+| `STREAK_N` | Number of consecutive wins required before streak bonuses apply. | `3` |
+| `STREAK_BONUS` | Bonus points awarded once the streak threshold is reached and on each subsequent win while the streak is maintained. | `1` |
+| `ALLOWED_ORIGINS` | Comma-separated list of allowed origins when `APP_ENV` is not `development`. | `*` |
+| `REALTIME_HMAC_SECRET` | Secret used to mint guest tokens for the realtime gateway. | `change-me` |
 | `ALLOWED_ORIGINS` | Comma-separated list of allowed origins when `APP_ENV` is not `development`. | `*` |
 
 Copy `.env.example` from the repository root to `.env` and adjust the values if needed before launching Docker Compose.
@@ -111,5 +118,31 @@ curl -X POST http://localhost/api/rounds/1/guess \
   -H 'Content-Type: application/json' \
   -d '{"user_id":2,"guess_text":"Never Gonna Give You Up"}'
 ```
+
+Fuzzy matching (accents and punctuation are tolerated):
+
+```bash
+curl -X POST http://localhost/api/rounds/1/guess \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":2,"guess_text":"Névèr; gônna give you up!"}'
+```
+
+## Règles de points
+
+- Première bonne réponse d'un joueur dans une partie : `POINTS_CORRECT_GUESS` + `BONUS_FIRST_BLOOD` (si activé).
+- Chaque bonne réponse suivante rapporte `POINTS_CORRECT_GUESS`.
+- Lorsqu'un joueur atteint `STREAK_N` victoires consécutives, il reçoit `STREAK_BONUS` en plus de la valeur de base, puis conserve ce bonus pour chaque victoire tant que la série reste ≥ `STREAK_N`.
+
+### Guest realtime token
+
+Request a signed token that can be used during the Socket.IO handshake:
+
+```bash
+curl -X POST http://localhost/api/token/guest \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":1,"username":"PlayerOne"}'
+```
+
+The response returns `{ "ok": true, "data": { "token": "..." } }`. Supply the returned token along with `userId`, `username`, and `gameId` when connecting to `/socket.io/game`.
 
 Additional endpoints for starting games, advancing rounds, and retrieving state follow the same JSON conventions. Refer to `PlayerRoutes.php` and `AdminRoutes.php` for the complete list.
