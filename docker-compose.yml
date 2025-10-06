@@ -1,0 +1,139 @@
+version: '3.9'
+
+services:
+  nginx:
+    image: nginx:1.25-alpine
+    depends_on:
+      web:
+        condition: service_completed_successfully
+      php:
+        condition: service_healthy
+      realtime:
+        condition: service_started
+    ports:
+      - "80:80"
+    volumes:
+      - web_build:/usr/share/nginx/html:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - melodyquest_net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+      - web_build:/app/dist
+    command: sh -c "npm install && npm run build"
+    environment:
+      - NODE_ENV=production
+    networks:
+      - melodyquest_net
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  php:
+    build:
+      context: ./apps/api-php
+      dockerfile: Dockerfile
+    volumes:
+      - ./apps/api-php:/var/www/api
+      - /var/www/api/vendor
+    environment:
+      - APP_ENV=development
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+    networks:
+      melodyquest_net:
+        aliases:
+          - php-fpm
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-m"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  mysql:
+    image: mysql:8.3
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${DB_DATABASE}
+      - MYSQL_USER=${DB_USERNAME}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./infra/db-init:/docker-entrypoint-initdb.d
+    command: ["mysqld", "--character-set-server=utf16", "--collation-server=utf16_general_ci"]
+    networks:
+      - melodyquest_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - redis_data:/data
+      - ./infra/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - melodyquest_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  realtime:
+    build:
+      context: ./apps/realtime-node
+      dockerfile: Dockerfile
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REALTIME_PORT=3000
+      - REALTIME_HMAC_SECRET=${REALTIME_HMAC_SECRET}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+    ports:
+      - "3000:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - melodyquest_net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  melodyquest_net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:
+  web_node_modules:
+  web_build:
