@@ -1,93 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { io, Socket } from "socket.io-client";
+import { api } from "./http";
 
-type UserRef = {
-  id: number;
-  username: string;
-  token?: string;
-};
+export type UserInfo = { id: number; username: string; token?: string };
 
-type SocketHook = {
-  socket: Socket | null;
-  connected: boolean;
-  on: (event: string, handler: (...args: any[]) => void) => void;
-  off: (event: string, handler: (...args: any[]) => void) => void;
-};
+export async function getGuestToken(user: {id:number; username:string}) {
+  const r = await api.post<{token:string}>("/token/guest", { user_id: user.id, username: user.username });
+  if (!r.ok || !r.data?.token) throw new Error("guest token failed");
+  return r.data.token;
+}
 
-const wsPath = import.meta.env.VITE_WS_URL || '/socket.io';
-
-export function useSocket(gameId: number | null, user?: UserRef | null): SocketHook {
-  const socketRef = useRef<Socket | null>(null);
-  const [connected, setConnected] = useState(false);
-
-  useEffect(() => {
-    if (!gameId || !user?.id) {
-      setConnected(false);
-      return;
-    }
-
-    const query: Record<string, string> = {
+export async function connectGameSocket(basePath: string, gameId: number, user: UserInfo): Promise<Socket> {
+  const token = user.token ?? await getGuestToken(user);
+  const trimmed = basePath.trim();
+  const isAbsolute = /^https?:\/\//i.test(trimmed);
+  const sanitized = trimmed.replace(/\/$/, '');
+  const target = sanitized && isAbsolute ? `${sanitized}/game` : '/game';
+  const pathOption = !isAbsolute && sanitized ? sanitized : undefined;
+  const socket = io(target, {
+    transports: ["websocket", "polling"],
+    autoConnect: false,
+    ...(pathOption ? { path: pathOption } : {}),
+    query: {
       gameId: String(gameId),
       userId: String(user.id),
-      username: user.username
-    };
-
-    if (user.token) {
-      query.token = user.token;
+      username: user.username,
+      token
     }
-
-    const socket = io('/game', {
-      path: wsPath,
-      transports: ['websocket', 'polling'],
-      withCredentials: true,
-      autoConnect: true,
-      query
-    });
-
-    socketRef.current = socket;
-
-    const sendHello = () => {
-      socket.emit('hello', {
-        gameId,
-        userId: user.id,
-        username: user.username,
-        token: user.token
-      });
-    };
-
-    socket.on('connect', () => {
-      setConnected(true);
-      sendHello();
-    });
-
-    socket.on('disconnect', () => {
-      setConnected(false);
-    });
-
-    socket.on('connect_error', (err) => {
-      console.error('Socket connection error', err);
-    });
-
-    return () => {
-      socket.removeAllListeners();
-      socket.disconnect();
-      socketRef.current = null;
-      setConnected(false);
-    };
-  }, [gameId, user?.id, user?.username, user?.token]);
-
-  const on = useCallback((event: string, handler: (...args: any[]) => void) => {
-    socketRef.current?.on(event, handler);
-  }, []);
-
-  const off = useCallback((event: string, handler: (...args: any[]) => void) => {
-    socketRef.current?.off(event, handler);
-  }, []);
-
-  return {
-    socket: socketRef.current,
-    connected,
-    on,
-    off
-  };
+  });
+  socket.connect();
+  socket.emit("hello", { gameId, userId: user.id, username: user.username, token });
+  return socket;
 }

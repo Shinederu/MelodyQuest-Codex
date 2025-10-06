@@ -26,7 +26,12 @@ class CorsMiddleware implements MiddlewareInterface
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $origin = $request->getHeaderLine('Origin');
-        $isAllowed = $this->allowAll || $origin === '' || in_array($origin, $this->allowedOrigins, true);
+        $isAllowed = $this->allowAll
+            || ($origin !== '' && in_array($origin, $this->allowedOrigins, true));
+
+        if ($origin === '' && !$this->allowAll) {
+            $isAllowed = false;
+        }
 
         if (strtoupper($request->getMethod()) === 'OPTIONS') {
             if (!$isAllowed) {
@@ -48,14 +53,19 @@ class CorsMiddleware implements MiddlewareInterface
 
     private function applyHeaders(ResponseInterface $response, string $origin): ResponseInterface
     {
-        $allowOrigin = $this->allowAll ? ($origin !== '' ? $origin : '*') : $origin;
-
         $headers = $response
-            ->withHeader('Access-Control-Allow-Origin', $allowOrigin === '' ? '*' : $allowOrigin)
-            ->withHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Token')
+            ->withHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, X-Admin-Token, Authorization')
             ->withHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,OPTIONS')
-            ->withHeader('Access-Control-Allow-Credentials', 'true')
+            ->withHeader('Access-Control-Max-Age', '86400')
             ->withHeader('Vary', 'Origin');
+
+        if ($origin !== '') {
+            $headers = $headers
+                ->withHeader('Access-Control-Allow-Origin', $origin)
+                ->withHeader('Access-Control-Allow-Credentials', 'true');
+        } elseif ($this->allowAll) {
+            $headers = $headers->withHeader('Access-Control-Allow-Origin', '*');
+        }
 
         return $headers;
     }

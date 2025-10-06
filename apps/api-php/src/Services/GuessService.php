@@ -191,7 +191,6 @@ class GuessService
 
                 $scoreUpdateEvent = [
                     'type' => 'SCORE_UPDATE',
-                    'game_id' => $roundForUpdate->game_id,
                     'scores' => $scoresForEvent,
                 ];
             }

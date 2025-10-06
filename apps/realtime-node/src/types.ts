@@ -4,7 +4,7 @@ export const HelloPayloadSchema = z.object({
   gameId: z.coerce.number().int().positive(),
   userId: z.coerce.number().int().positive(),
   username: z.string().min(1).max(128),
-  token: z.string().min(1).optional()
+  token: z.string().min(1)
 });
 
 export type HelloPayload = z.infer<typeof HelloPayloadSchema>;

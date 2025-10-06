@@ -21,42 +21,28 @@ class PlayerRoutes
         $responseFactory = $app->getResponseFactory();
 
         $app->post('/api/token/guest', function ($request) use ($responseFactory) {
-            $body = (array) $request->getParsedBody();
-            $validator = v::key('user_id', v::intType()->positive())
-                ->key('username', v::stringType()->length(1, 64));
+            $body = (array) ($request->getParsedBody() ?? []);
+            $username = trim((string) ($body['username'] ?? ''));
+            $userId = (int) ($body['user_id'] ?? 0);
 
-            try {
-                $validator->assert($body);
-            } catch (NestedValidationException $exception) {
-                return Responses::jsonErr(
-                    $responseFactory,
-                    'VALIDATION_ERROR',
-                    'Invalid guest token payload',
-                    422,
-                    $exception->getMessages()
-                );
+            if ($userId <= 0 || $username === '') {
+                return Responses::jsonErr($responseFactory, 'VALIDATION_ERROR', 'username and user_id are required', 422);
             }
 
-            $user = User::find((int) $body['user_id']);
-            if ($user === null) {
-                return Responses::jsonErr($responseFactory, 'USER_NOT_FOUND', 'User not found', 404);
+            $user = User::find($userId);
+            if ($user === null || $user->username !== $username) {
+                return Responses::jsonErr($responseFactory, 'NOT_FOUND', 'user not found', 404);
             }
 
-            $secret = Config::realtimeHmacSecret();
+            $secret = (string) Config::env('REALTIME_HMAC_SECRET', '');
             if ($secret === '') {
-                return Responses::jsonErr($responseFactory, 'TOKEN_DISABLED', 'Guest token generation is not configured', 503);
+                return Responses::jsonErr($responseFactory, 'CONFIG_ERROR', 'REALTIME_HMAC_SECRET missing', 500);
             }
 
-            $username = (string) $body['username'];
-            if ($user->username !== $username) {
-                $username = $user->username;
-            }
+            $msg = sprintf('%d.%s', $userId, $username);
+            $sig = rtrim(strtr(base64_encode(hash_hmac('sha256', $msg, $secret, true)), '+/', '-_'), '=');
 
-            $payload = sprintf('%d.%s', $user->id, $username);
-            $tokenBinary = hash_hmac('sha256', $payload, $secret, true);
-            $token = rtrim(strtr(base64_encode($tokenBinary), '+/', '-_'), '=');
-
-            return Responses::jsonOk($responseFactory, ['token' => $token]);
+            return Responses::jsonOk($responseFactory, ['token' => $sig]);
         });
 
         $app->post('/api/users', function ($request) use ($responseFactory) {

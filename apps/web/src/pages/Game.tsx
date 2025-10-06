@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import type { Socket } from 'socket.io-client';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/http';
 import { useAuthStore } from '../store/auth';
@@ -8,7 +9,7 @@ import { Input } from '../components/Input';
 import Loader from '../components/Loader';
 import Scoreboard from '../components/Scoreboard';
 import YouTubePlayer from '../components/YouTubePlayer';
-import { useSocket } from '../lib/socket';
+import { connectGameSocket } from '../lib/socket';
 
 interface GameStateResponse {
   game: any;
@@ -29,7 +30,8 @@ function Game() {
 
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const { on, off } = useSocket(gameId, user);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const wsBase = import.meta.env.VITE_WS_URL || '/socket.io';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [guess, setGuess] = useState('');
@@ -131,6 +133,56 @@ function Game() {
   }, [fetchState]);
 
   useEffect(() => {
+    let disposed = false;
+    let activeSocket: Socket | null = null;
+
+    const handleDisconnect = () => undefined;
+    const handleConnectError = (err: unknown) => {
+      console.error('Socket connection error', err);
+      if (!disposed) {
+        setError('Connexion temps réel impossible');
+      }
+    };
+
+    const connectSocket = async () => {
+      if (!gameId || !user) {
+        setSocket(null);
+        return;
+      }
+      try {
+        const instance = await connectGameSocket(wsBase, gameId, {
+          id: user.id,
+          username: user.username,
+          token: user.token
+        });
+        if (disposed) {
+          instance.disconnect();
+          return;
+        }
+        activeSocket = instance;
+        setSocket(instance);
+        setError((prev) => (prev === 'Connexion temps réel impossible' ? '' : prev));
+        instance.on('disconnect', handleDisconnect);
+        instance.on('connect_error', handleConnectError);
+      } catch (err) {
+        handleConnectError(err);
+      }
+    };
+
+    connectSocket();
+
+    return () => {
+      disposed = true;
+      if (activeSocket) {
+        activeSocket.off('disconnect', handleDisconnect);
+        activeSocket.off('connect_error', handleConnectError);
+        activeSocket.disconnect();
+      }
+      setSocket(null);
+    };
+  }, [gameId, user?.id, user?.username, user?.token, wsBase]);
+
+  useEffect(() => {
     if (!currentRound) return;
     setTimer(60);
     const interval = setInterval(() => {
@@ -140,7 +192,7 @@ function Game() {
   }, [currentRound?.id]);
 
   useEffect(() => {
-    if (!gameId) return;
+    if (!gameId || !socket) return;
 
     const handleRoundStart = () => {
       setHasSolved(false);
@@ -190,11 +242,13 @@ function Game() {
     };
 
     const handleScoreUpdate = (payload: any) => {
-      if (payload.user_id ?? payload.userId) {
-        const id = payload.user_id ?? payload.userId;
-        if (typeof payload.points === 'number') {
-          updateScore(id, payload.points);
-        }
+      if (Array.isArray(payload.scores)) {
+        payload.scores.forEach((entry: any) => {
+          const id = entry.user_id ?? entry.userId;
+          if (typeof id === 'number' && typeof entry.points === 'number') {
+            updateScore(id, entry.points);
+          }
+        });
       }
     };
 
@@ -203,22 +257,22 @@ function Game() {
       fetchState({ resetTimer: false, showSpinner: false });
     };
 
-    on('round:start', handleRoundStart);
-    on('round:solved', handleRoundSolved);
-    on('player:joined', handlePlayerJoined);
-    on('player:left', handlePlayerLeft);
-    on('score:update', handleScoreUpdate);
-    on('game:ended', handleGameEnded);
+    socket.on('round:start', handleRoundStart);
+    socket.on('round:solved', handleRoundSolved);
+    socket.on('player:joined', handlePlayerJoined);
+    socket.on('player:left', handlePlayerLeft);
+    socket.on('score:update', handleScoreUpdate);
+    socket.on('game:ended', handleGameEnded);
 
     return () => {
-      off('round:start', handleRoundStart);
-      off('round:solved', handleRoundSolved);
-      off('player:joined', handlePlayerJoined);
-      off('player:left', handlePlayerLeft);
-      off('score:update', handleScoreUpdate);
-      off('game:ended', handleGameEnded);
+      socket.off('round:start', handleRoundStart);
+      socket.off('round:solved', handleRoundSolved);
+      socket.off('player:joined', handlePlayerJoined);
+      socket.off('player:left', handlePlayerLeft);
+      socket.off('score:update', handleScoreUpdate);
+      socket.off('game:ended', handleGameEnded);
     };
-  }, [gameId, on, off, addPlayer, removePlayer, updateScore, setGameStatus, setCurrentRound, fetchState, user?.id]);
+  }, [gameId, socket, addPlayer, removePlayer, updateScore, setGameStatus, setCurrentRound, fetchState, user?.id]);
 
   const submitGuess = async (event: FormEvent) => {
     event.preventDefault();

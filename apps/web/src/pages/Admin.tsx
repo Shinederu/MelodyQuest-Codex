@@ -50,9 +50,13 @@ function Admin() {
   const fetchCategories = async () => {
     if (!adminToken) return;
     setLoadingCategories(true);
-    const response = await api.get<{ categories: Category[] }>('/admin/categories', { headers });
-    if (response.ok && response.data) {
-      setCategories(response.data.categories);
+    const response = await api.get<Category[] | { categories?: Category[] }>('/admin/categories', { headers });
+    if (response.ok) {
+      const payload = Array.isArray(response.data)
+        ? response.data
+        : response.data?.categories ?? [];
+      setCategories(payload);
+      setError('');
     } else {
       setError('Impossible de charger les catégories');
     }
@@ -67,9 +71,13 @@ function Admin() {
     if (filters.q) params.append('q', filters.q);
     const query = params.toString();
     const url = query ? `/admin/tracks?${query}` : '/admin/tracks';
-    const response = await api.get<{ tracks: TrackSummary[] }>(url, { headers });
-    if (response.ok && response.data) {
-      setTracks(response.data.tracks);
+    const response = await api.get<TrackSummary[] | { tracks?: TrackSummary[] }>(url, { headers });
+    if (response.ok) {
+      const payload = Array.isArray(response.data)
+        ? response.data
+        : response.data?.tracks ?? [];
+      setTracks(payload);
+      setError('');
     } else {
       setError('Impossible de charger les tracks');
     }

@@ -6,22 +6,19 @@ import { Server, Socket } from 'socket.io';
 import Redis from 'ioredis';
 import { BroadcastPayloadSchema, HelloPayload, HelloPayloadSchema, RedisEvent, RedisEventSchema } from './types';
 
-const appEnv = process.env.APP_ENV ?? 'development';
-const isDev = appEnv === 'development';
+const APP_ENV = process.env.APP_ENV ?? 'development';
+const isDev = APP_ENV === 'development';
 const realtimePort = Number(process.env.REALTIME_PORT ?? 3000);
 const redisHost = process.env.REDIS_HOST ?? 'redis';
 const redisPort = Number(process.env.REDIS_PORT ?? 6379);
-const allowedOriginsConfig = process.env.ALLOWED_ORIGINS ?? '*';
-const allowedOrigins = allowedOriginsConfig
+const rawAllowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((origin) => origin.trim())
   .filter((origin) => origin.length > 0);
-const allowedOriginSet = new Set(allowedOrigins);
-if (!isDev) {
-  allowedOriginSet.delete('*');
-}
-const allowAnyOrigin = isDev;
-const hmacSecret = process.env.REALTIME_HMAC_SECRET ?? '';
+const allowAnyOrigin = isDev || rawAllowedOrigins.includes('*');
+const ALLOWED_ORIGINS = rawAllowedOrigins.filter((origin) => origin !== '*');
+const allowedOriginSet = new Set(ALLOWED_ORIGINS);
+const HMAC_SECRET = process.env.REALTIME_HMAC_SECRET ?? '';
 const internalToken = process.env.ADMIN_TOKEN;
 
 const app = express();
@@ -141,6 +138,7 @@ type SocketData = {
   userId?: number;
   username?: string;
   joined?: boolean;
+  hello?: unknown;
 };
 
 const presence = new Map<string, Map<number, number>>();
@@ -218,24 +216,23 @@ function isOriginAllowed(origin: string) {
   return allowedOriginSet.has(origin);
 }
 
-function verifyHelloToken(payload: HelloPayload) {
-  if (!payload.token) {
-    return true;
+function verifyToken(userId: number, username: string, token: string) {
+  if (!token) {
+    return false;
   }
-  if (!hmacSecret) {
-    console.warn('[auth] token provided but REALTIME_HMAC_SECRET is not configured');
+  if (!HMAC_SECRET) {
+    console.warn('[auth] REALTIME_HMAC_SECRET is not configured');
     return false;
   }
   try {
-    const digest = crypto.createHmac('sha256', hmacSecret)
-      .update(`${payload.userId}.${payload.username}`)
+    const expected = crypto.createHmac('sha256', HMAC_SECRET)
+      .update(`${userId}.${username}`)
       .digest();
-    const expected = toBase64Url(digest);
-    const received = payload.token;
-    if (expected.length !== received.length) {
+    const provided = decodeBase64Url(token);
+    if (expected.length !== provided.length) {
       return false;
     }
-    return crypto.timingSafeEqual(Buffer.from(expected, 'utf8'), Buffer.from(received, 'utf8'));
+    return crypto.timingSafeEqual(expected, provided);
   } catch (err) {
     console.error('[auth] failed to verify token', err);
     return false;
@@ -258,32 +255,53 @@ function dispatchRedisEvent(channel: string, event: RedisEvent) {
   console.log(`[redis] ${channel} -> ${eventName}`);
 }
 
+io.of('/game').use((socket, next) => {
+  try {
+    if (!isDev) {
+      const origin = (socket.handshake.headers.origin as string | undefined) ?? '';
+      if (!origin || !isOriginAllowed(origin)) {
+        return next(new Error('Origin not allowed'));
+      }
+    }
+    const data = socket.data as SocketData;
+    data.hello = flattenQuery(socket.handshake.query);
+    next();
+  } catch (err) {
+    next(err as Error);
+  }
+});
+
 const gameNamespace = io.of('/game');
 
 gameNamespace.on('connection', (socket: Socket) => {
   console.log('[socket] connection', socket.id, socket.handshake.address);
-  const originHeader = socket.handshake.headers.origin as string | undefined;
-  if (originHeader && !isOriginAllowed(originHeader)) {
-    console.warn('[socket] rejected origin', originHeader);
-    socket.disconnect(true);
-    return;
-  }
-
-  const queryPayload = HelloPayloadSchema.safeParse(flattenQuery(socket.handshake.query));
-  if (queryPayload.success) {
-    handleHello(socket, queryPayload.data);
-  }
-
-  socket.on('hello', (raw) => {
-    if ((socket.data as SocketData).joined) {
+  const doJoin = (raw: unknown) => {
+    const data = socket.data as SocketData;
+    if (data.joined) {
       return;
     }
     const parsed = HelloPayloadSchema.safeParse(raw ?? {});
     if (!parsed.success) {
       socket.emit('hello:error', { message: 'INVALID_PAYLOAD', details: parsed.error.flatten() });
+      socket.disconnect(true);
       return;
     }
-    handleHello(socket, parsed.data);
+    const payload = parsed.data;
+    if (!verifyToken(payload.userId, payload.username, payload.token)) {
+      socket.emit('hello:error', { message: 'INVALID_TOKEN' });
+      socket.disconnect(true);
+      return;
+    }
+    joinGame(socket, payload);
+  };
+
+  const initialHello = (socket.data as SocketData).hello;
+  if (initialHello) {
+    doJoin(initialHello);
+  }
+
+  socket.on('hello', (raw) => {
+    doJoin(raw);
   });
 
   socket.on('disconnect', () => {
@@ -295,12 +313,7 @@ gameNamespace.on('connection', (socket: Socket) => {
   });
 });
 
-function handleHello(socket: Socket, payload: HelloPayload) {
-  if (!verifyHelloToken(payload)) {
-    socket.emit('hello:error', { message: 'INVALID_TOKEN' });
-    socket.disconnect(true);
-    return;
-  }
+function joinGame(socket: Socket, payload: HelloPayload) {
   const room = `game:${payload.gameId}`;
   incrementPresence(room, payload.userId);
   Promise.resolve(socket.join(room)).catch((err: unknown) =>
@@ -353,10 +366,9 @@ function flattenQuery(query: Record<string, unknown>) {
   return flattened;
 }
 
-function toBase64Url(buffer: Buffer) {
-  return buffer
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
+function decodeBase64Url(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padding = normalized.length % 4;
+  const padded = padding === 0 ? normalized : normalized + '='.repeat(4 - padding);
+  return Buffer.from(padded, 'base64');
 }
