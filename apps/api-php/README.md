@@ -34,6 +34,11 @@ This service exposes the REST API for MelodyQuest using Slim 4 and Eloquent. It 
 
 Copy `.env.example` from the repository root to `.env` and adjust the values if needed before launching Docker Compose.
 
+## Production notes
+
+- Configure the database charset through `DB_CHARSET` and `DB_COLLATION` (recommended: `utf8mb4` / `utf8mb4_unicode_ci`) to avoid incompatible MySQL settings.
+- Load balancers such as HAProxy can monitor the service by sending `User-Agent: HAProxy-HealthCheck` to `/api/health`; the API responds with `{ "ok": true }` without going through Slim's middleware stack.
+
 ## Running locally
 
 The Docker Compose stack already runs composer install and boots PHP-FPM. From the repository root, start everything with:
