@@ -1,0 +1,14 @@
+{
+  "name": "melodyquest-realtime",
+  "version": "0.1.0",
+  "description": "MelodyQuest realtime gateway using Socket.IO",
+  "type": "module",
+  "scripts": {
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "ioredis": "^5.4.1",
+    "socket.io": "^4.7.5",
+    "zod": "^3.22.4"
+  }
+}
