@@ -23,6 +23,7 @@ This service exposes the REST API for MelodyQuest using Slim 4 and Eloquent. It 
 | `STREAK_BONUS` | Bonus points awarded once the streak threshold is reached and on each subsequent win while the streak is maintained. | `1` |
 | `ALLOWED_ORIGINS` | Comma-separated list of allowed origins when `APP_ENV` is not `development`. | `*` |
 | `REALTIME_HMAC_SECRET` | Secret used to mint guest tokens for the realtime gateway. | `change-me` |
+| `ALLOWED_ORIGINS` | Comma-separated list of allowed origins when `APP_ENV` is not `development`. | `*` |
 
 Copy `.env.example` from the repository root to `.env` and adjust the values if needed before launching Docker Compose.
 
