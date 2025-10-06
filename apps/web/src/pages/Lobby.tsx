@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import type { Socket } from 'socket.io-client';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/http';
 import { useAuthStore } from '../store/auth';
@@ -7,7 +8,7 @@ import { Card } from '../components/Card';
 import { Input } from '../components/Input';
 import { Select } from '../components/Select';
 import Loader from '../components/Loader';
-import { useSocket } from '../lib/socket';
+import { connectGameSocket } from '../lib/socket';
 
 interface Category {
   id: number;
@@ -33,11 +34,12 @@ function Lobby() {
   const [players, setPlayers] = useState<PlayerEntry[]>([]);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [socket, setSocket] = useState<Socket | null>(null);
 
   const adminToken = useMemo(() => localStorage.getItem('adminToken') || '', []);
   const headers = useMemo(() => (adminToken ? { 'X-Admin-Token': adminToken } : {}), [adminToken]);
 
-  const { connected, on, off } = useSocket(gameId, user);
+  const wsBase = import.meta.env.VITE_WS_URL || '/socket.io';
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -56,7 +58,44 @@ function Lobby() {
   }, [headers]);
 
   useEffect(() => {
-    if (!gameId || !user) return;
+    let disposed = false;
+    let activeSocket: Socket | null = null;
+
+    const connectSocket = async () => {
+      if (!gameId || !user) {
+        setSocket(null);
+        return;
+      }
+      try {
+        const instance = await connectGameSocket(wsBase, gameId, {
+          id: user.id,
+          username: user.username,
+          token: user.token
+        });
+        if (disposed) {
+          instance.disconnect();
+          return;
+        }
+        activeSocket = instance;
+        setSocket(instance);
+      } catch (err) {
+        console.error('Socket connection error', err);
+      }
+    };
+
+    connectSocket();
+
+    return () => {
+      disposed = true;
+      if (activeSocket) {
+        activeSocket.disconnect();
+      }
+      setSocket(null);
+    };
+  }, [gameId, user?.id, user?.username, user?.token, wsBase]);
+
+  useEffect(() => {
+    if (!gameId || !user || !socket) return;
 
     const handleJoin = (payload: { user_id?: number; userId?: number; username?: string; user?: { username?: string } }) => {
       const id = payload.user_id ?? payload.userId;
@@ -76,14 +115,14 @@ function Lobby() {
       setPlayers((prev) => prev.filter((player) => player.id !== id));
     };
 
-    on('player:joined', handleJoin);
-    on('player:left', handleLeave);
+    socket.on('player:joined', handleJoin);
+    socket.on('player:left', handleLeave);
 
     return () => {
-      off('player:joined', handleJoin);
-      off('player:left', handleLeave);
+      socket.off('player:joined', handleJoin);
+      socket.off('player:left', handleLeave);
     };
-  }, [gameId, user, on, off]);
+  }, [gameId, user, socket]);
 
   const handleCreateUser = async (event: FormEvent) => {
     event.preventDefault();
@@ -220,7 +259,10 @@ function Lobby() {
       </Card>
 
       {gameId && (
-        <Card title={`Lobby #${gameId}`} actions={<span>{connected ? 'Socket connecté' : 'Connexion...'}</span>}>
+        <Card
+          title={`Lobby #${gameId}`}
+          actions={<span>{socket?.connected ? 'Socket connecté' : 'Connexion...'}</span>}
+        >
           <div className="space-y-3 text-sm">
             {message && <p className="text-emerald-300">{message}</p>}
             <div className="flex items-center gap-3">

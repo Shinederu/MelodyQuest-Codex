@@ -19,6 +19,11 @@ Socket.IO gateway that relays MelodyQuest game updates over WebSockets and Redis
 | `REALTIME_HMAC_SECRET` | _(required for token verification)_ | Secret used to verify handshake tokens. |
 | `ADMIN_TOKEN` | _(optional)_ | Enables `/internal/broadcast` endpoint when set. |
 
+## Sécurité minimale
+
+- Hors développement, seules les origines déclarées dans `ALLOWED_ORIGINS` sont autorisées lors du handshake Socket.IO (`Origin` obligatoire).
+- Les clients doivent fournir un jeton invité signé via `POST /api/token/guest`; toute connexion sans HMAC valide est immédiatement refusée.
+
 ## Installation
 
 ```bash

@@ -62,5 +62,5 @@ En mode Docker Compose, le build est généré pendant la phase `docker compose 
 ## Notes
 
 - Les appels API utilisent un client `fetch` centralisé (`src/lib/http.ts`) avec enveloppe `{ ok, data }` conforme aux réponses Slim.
-- Le hook `useSocket` encapsule la connexion Socket.IO namespace `/game` et gère automatiquement l'envoi de l'événement `hello`.
+- La fonction utilitaire `connectGameSocket` récupère d'abord un jeton invité via `POST /api/token/guest` puis initialise la connexion Socket.IO `/game` avec l'HMAC requis.
 - Le lecteur YouTube s'appuie exclusivement sur l'IFrame API officielle (script chargé de manière lazy) conformément aux exigences du projet.

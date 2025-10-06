@@ -2,6 +2,13 @@
 
 This service exposes the REST API for MelodyQuest using Slim 4 and Eloquent. It expects the infrastructure defined in the repository (MySQL, Redis, Nginx, realtime gateway) to be running through Docker Compose.
 
+## Post-audit fixes
+
+- `public/index.php` now boots the Slim instance returned by `bootstrap/app.php`, ensuring middlewares, rate-limiters and routes are registered.
+- Added `POST /api/token/guest` to mint the HMAC used by the realtime gateway during Socket.IO handshakes.
+- Redis `SCORE_UPDATE` events now broadcast a `scores: [{ "user_id": number, "points": number }]` payload compatible with the web client.
+- `GET /api/games/:id/state` exposes `rules.points` so the frontend can display the scoring configuration driven by environment variables.
+
 ## Environment variables
 
 | Variable | Description | Default |

@@ -234,14 +234,17 @@ class GameService
             'game' => $game->toArray(),
             'players' => $game->players->map(fn ($player) => $player->toArray())->all(),
             'currentRound' => $currentRound?->load('track')->toArray(),
-            'scores' => $scores->map(fn ($score) => $score->toArray())->all(),
+            'scores' => $scores->map(fn ($score) => [
+                'user_id' => (int) $score->user_id,
+                'points' => (int) $score->points,
+            ])->all(),
             'rules' => [
                 'round_count' => $game->round_count,
                 'points' => [
-                    'correctGuess' => Config::pointsCorrectGuess(),
-                    'bonusFirstBlood' => Config::bonusFirstBlood(),
-                    'streakN' => Config::streakLength(),
-                    'streakBonus' => Config::streakBonus(),
+                    'correctGuess' => (int) Config::env('POINTS_CORRECT_GUESS', 1),
+                    'bonusFirstBlood' => (int) Config::env('BONUS_FIRST_BLOOD', 1),
+                    'streakN' => (int) Config::env('STREAK_N', 3),
+                    'streakBonus' => (int) Config::env('STREAK_BONUS', 1),
                 ],
             ],
         ];
