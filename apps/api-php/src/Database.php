@@ -24,8 +24,8 @@ class Database
             'database' => Config::env('DB_DATABASE', 'melodyquest'),
             'username' => Config::env('DB_USERNAME', 'root'),
             'password' => Config::env('DB_PASSWORD', 'secret'),
-            'charset' => 'utf16',
-            'collation' => 'utf16_general_ci',
+            'charset' => Config::env('DB_CHARSET', 'utf8mb4'),
+            'collation' => Config::env('DB_COLLATION', 'utf8mb4_unicode_ci'),
             'prefix' => '',
         ]);
 
